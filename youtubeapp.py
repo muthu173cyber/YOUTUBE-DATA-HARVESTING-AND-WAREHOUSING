@@ -1,7 +1,7 @@
+#------------------------------------------YOUTUBE DATA HARVESTING AND WAREHOUSING-------------------------------------------#
 import streamlit as st
 from streamlit_option_menu import option_menu
 from pyyoutube import Api
-
 
 #mongoDB imports
 import pymongo
@@ -19,15 +19,17 @@ import re
 import plotly.express as px
 import isodate
 
+import isodate
+#-------------------------------------------------------------------------------------------------------------------------#
 api = Api(api_key="AIzaSyBhDQN9OAhopYa8V8k0V_AEG24BACbywx0")
 
-#establishing a connection in mongodb
-client = pymongo.MongoClient("mongodb+srv://user:password@cluster0.s3tzdgl.mongodb.net/?retryWrites=true&w=majority")
+#CREATING A CONNECTION IN MONGODB
+client = pymongo.MongoClient("mongodb+srv://ms1703:ms1703@cluster0.s3tzdgl.mongodb.net/?retryWrites=true&w=majority")
 dv = client.e12
 collection=dv.youtube
 
 
-# #establishing a connection in sql
+#CREATING A CONNECTION IN SQL 
 connect = mysql.connector.connect(
 host = "localhost",
 user = "root",
@@ -40,13 +42,13 @@ engine = create_engine('mysql+pymysql://root:@localhost/youtube_data?charset=utf
 
 
 
-#pushing youtube details into mongoDB
+#PUSHING THE YOUTUBE DATA TO MONGODB
 def push_to_mongo(pd_youtube):
     push_status = collection.insert_one(pd_youtube)
     return push_status
 
 
-#extracting channel names from documnets pushed into mongoDB
+#EXTRACTING CHANNEL NAMES AND STORED IN MONGODB
 def extract_channel_names():
     channel_names = []
     documents = collection.find()
@@ -59,10 +61,10 @@ def extract_channel_names():
             position_key += 1
     return channel_names
 
-#Extracting channel details
+#EXTRACTING CHANNEL DETAILS
 def get_channel_details(channel_id):
     
-    # channel
+    #channel
     channel = api.get_channel_info(channel_id=channel_id)
     channel_name = channel.items[0].to_dict()["snippet"]["title"]
     full_details_to_store = {}
@@ -89,7 +91,7 @@ def get_channel_details(channel_id):
             "videos": []
         }
     
-    # videos
+    #video   
     playlist_dict = {}
     for i in [i.id for i in playlists_by_channel.items]:
         if i not in playlist_dict:
@@ -120,24 +122,6 @@ def get_channel_details(channel_id):
                     full_details_to_store[channel_name]["videos"][i.contentDetails.videoId] = vid_dict
 
     
-    # Define a function to convert duration
-    def convert_duration(duration):
-            regex = r'PT(\d+H)?(\d+M)?(\d+S)?'
-            match = re.match(regex, duration)
-            if not match:
-                return '00:00:00'
-            hours, minutes, seconds = match.groups()
-            hours = int(hours[:-1]) if hours else 0
-            minutes = int(minutes[:-1]) if minutes else 0
-            seconds = int(seconds[:-1]) if seconds else 0
-            total_seconds = hours * 3600 + minutes * 60 + seconds
-            return '{:02d}:{:02d}:{:02d}'.format(int(total_seconds / 3600), int((total_seconds % 3600) / 60), int(total_seconds % 60))
-   
-    
-    
-    
-    
-    
     # comment
     for video_id in full_details_to_store[channel_name]["videos"]:
         com_dict = {}
@@ -155,63 +139,61 @@ def get_channel_details(channel_id):
             full_details_to_store[channel_name]["comments"][comment_id] = com_dict
    
     return {"channel_name": full_details_to_store[channel_name]["channel_name"], "data": full_details_to_store[channel_name]}
+#-------------------------------------------------------------------------------------------------------------------------------#
 
-
-#Migrating channel details data from mongodb to SQL
+#MIGRATE TO SQL
 def migrate_to_sql(channel_name):
+    channel_data = collection.find({"channel_name": channel_name})[0]
 
-    channel_data = collection.find({"channel_name": channel_names})[0]
-
-    channel_df = pd.DataFrame([[channel_data["data"]["channel_name"], channel_data["data"]["channel_id"], channel_data["data"]["video_count"] , channel_data["data"]["channel_views"], channel_data["data"]["channel_description"]]], 
-                                columns=["Channel_Name", "Channel_Id","Video_Count" ,"Channel_Views", "Channel_Description"])
-    channel_df.to_sql('channel', engine, if_exists='append', index=False, 
-                        dtype={"Channel_Name": sqlalchemy.types.VARCHAR(length=225),
-                            "Channel_Id": sqlalchemy.types.VARCHAR(length=225),
-                            "Channel_Views": sqlalchemy.types.BigInteger,
-                            "Channel_Description": sqlalchemy.types.TEXT})
+    channel_df = pd.DataFrame([[channel_data["data"]["channel_name"], channel_data["data"]["channel_id"], channel_data["data"]["video_count"], channel_data["data"]["channel_views"], channel_data["data"]["channel_description"]]],
+                              columns=["Channel_Name", "Channel_Id", "Video_Count", "Channel_Views", "Channel_Description"])
+    channel_df.to_sql('channel', engine, if_exists='append', index=False,
+                      dtype={"Channel_Name": sqlalchemy.types.VARCHAR(length=225),
+                             "Channel_Id": sqlalchemy.types.VARCHAR(length=225),
+                             "Channel_Views": sqlalchemy.types.BigInteger,
+                             "Channel_Description": sqlalchemy.types.TEXT})
 
     playlist = []
     for key, val in channel_data["data"]["playlists"].items():
-        playlist.append([val["playlist_id"], val["channel_id"], val["playlist_title"]])
+        playlist.append([key, val["channel_id"], val["playlist_title"]])
     playlist_df = pd.DataFrame(playlist, columns=["Playlist_Id", "Channel_Id", "Playlist_Title"])
-    playlist_df.to_sql('playlist', engine, if_exists='append', index=False, 
-                        dtype={"Playlist_Id": sqlalchemy.types.VARCHAR(length=225),
-                            "Channel_Id": sqlalchemy.types.VARCHAR(length=225),
-                            "Playlist_Title": sqlalchemy.types.VARCHAR(length=225)})
+    playlist_df.to_sql('playlist', engine, if_exists='append', index=False,
+                       dtype={"Playlist_Id": sqlalchemy.types.VARCHAR(length=225),
+                              "Channel_Id": sqlalchemy.types.VARCHAR(length=225),
+                              "Playlist_Title": sqlalchemy.types.VARCHAR(length=225)})
 
     video = []
     for key, val in channel_data["data"]["videos"].items():
-        video.append([val["video_id"], val['channel_id'], val["video_name"], val["video_description"],val["published_at"],val["view_count"],val["like_count"],val["dislike_count"],val["comment_count"],val["duration"],val["caption_status"]])
-    video_df = pd.DataFrame(video, columns=["Video_Id", 'Channel_Id' ,"Video_Name", "Video_Description",'Published_date','View_Count','Like_Count','Dislike_Coun','Comment_Count','Duration','Caption_Status'])
-    video_df.to_sql('video', engine, if_exists='append', index=False, 
-                        dtype={'Video_Id': sqlalchemy.types.VARCHAR(length=225),
-                            'Channel_Id': sqlalchemy.types.VARCHAR(length=225),
-                            'Video_Name': sqlalchemy.types.VARCHAR(length=225),
-                            'Video_Description': sqlalchemy.types.TEXT,
-                            'Published_date': sqlalchemy.types.String(length=50),
-                            'View_Count': sqlalchemy.types.BigInteger,
-                            'Like_Count': sqlalchemy.types.BigInteger,
-                            'Dislike_Coun': sqlalchemy.types.INT,
-                            'Comment_Count': sqlalchemy.types.INT,
-                            'Duration': sqlalchemy.types.VARCHAR(length=1024),
-                            'Caption_Status': sqlalchemy.types.VARCHAR(length=225)})
-    video_df['durationSecs'] = video_df['Duration'].apply(lambda x: isodate.parse_duration(x))
-    video_df['durationSecs'] = video_df['durationSecs'].astype('timedelta64[s]')
-    
-    
+        video.append([key, val['channel_id'], val["video_name"], val["video_description"], val["published_at"], val["view_count"], val["like_count"], val["dislike_count"], val["comment_count"], val["duration"], val["caption_status"]])
+    video_df = pd.DataFrame(video, columns=["Video_Id", 'Channel_Id', "Video_Name", "Video_Description", 'Published_date', 'View_Count', 'Like_Count', 'Dislike_Coun', 'Comment_Count', 'Duration', 'Caption_Status'])
+    video_df.to_sql('video', engine, if_exists='append', index=False,
+                    dtype={'Video_Id': sqlalchemy.types.VARCHAR(length=225),
+                           'Channel_Id': sqlalchemy.types.VARCHAR(length=225),
+                           'Video_Name': sqlalchemy.types.VARCHAR(length=225),
+                           'Video_Description': sqlalchemy.types.TEXT,
+                           'Published_date': sqlalchemy.types.String(length=50),
+                           'View_Count': sqlalchemy.types.BigInteger,
+                           'Like_Count': sqlalchemy.types.BigInteger,
+                           'Dislike_Coun': sqlalchemy.types.Integer,
+                           'Comment_Count': sqlalchemy.types.Integer,
+                           'Duration': sqlalchemy.types.VARCHAR(length=1024),
+                           'Caption_Status': sqlalchemy.types.VARCHAR(length=225)})
+    video_df['durationSecs'] = video_df['Duration'].apply(lambda x: isodate.parse_duration(x).total_seconds())
     
     comment = []
     for key, val in channel_data["data"]["comments"].items():
-        comment.append([val["Video_id"],val['channel_id'] , val["Comment_Id"], val["Comment_Text"],val["Comment_Author"],val["Comment_PublishedAt"]])
-    comment_df = pd.DataFrame(comment, columns=['Video_Id','Channel_Id','Comment_Id','Comment_Text','Comment_Author','Comment_Published_date'])
+        comment.append([val["Video_id"], val['channel_id'], val["Comment_Id"], val["Comment_Text"], val["Comment_Author"], val["Comment_PublishedAt"]])
+    comment_df = pd.DataFrame(comment, columns=['Video_Id', 'Channel_Id', 'Comment_Id', 'Comment_Text', 'Comment_Author', 'Comment_Published_date'])
     comment_df.to_sql('comment', engine, if_exists='append', index=False,
-                        dtype={'Video_Id': sqlalchemy.types.VARCHAR(length=225),
-                            'Channel_Id': sqlalchemy.types.VARCHAR(length=225),
-                            'Comment_Id': sqlalchemy.types.VARCHAR(length=225),
-                            'Comment_Text': sqlalchemy.types.TEXT,
-                            'Comment_Author': sqlalchemy.types.VARCHAR(length=225),
-                            'Comment_Published_date': sqlalchemy.types.String(length=50)})
-    return
+                      dtype={'Video_Id': sqlalchemy.types.VARCHAR(length=225),
+                             'Channel_Id': sqlalchemy.types.VARCHAR(length=225),
+                             'Comment_Id': sqlalchemy.types.VARCHAR(length=225),
+                             'Comment_Text': sqlalchemy.types.TEXT,
+                             'Comment_Author': sqlalchemy.types.VARCHAR(length=225),
+                             'Comment_Published_date': sqlalchemy.types.String(length=50)})
+    return 0
+
+
 
 
 
@@ -275,7 +257,23 @@ if selected == "SELECT AND STORE":
             st.markdown('<p style="font-weight:bold;color:violet;">DATA INSERTED IN MONGODB</p>', unsafe_allow_html=True)
         else:
             st.markdown('<p style="font-weight:bold;color:red;">Error: DATA NOT INSERTED IN MONGODB</p>', unsafe_allow_html=True)
-       
+
+    # Function to clear the collection
+    def clear_collection():
+     collection.delete_many({})
+     st.write("Collection cleared successfully!")
+
+    # Streamlit app
+    def main():
+     st.write("BY CLICKING ON THE BELOW BUTTON YOU CAN CLEAR THE COLLECTIONS IN MONGODB")
+     clear_button = st.button("CLEAR COLLECTION IN MONGODB")
+
+     if clear_button:
+        clear_collection()
+
+    if __name__ == '__main__':
+     main()
+   
 
 if selected == "MIGRATION OF DATA":
      channel_name = extract_channel_names()
@@ -285,6 +283,30 @@ if selected == "MIGRATION OF DATA":
         migrate_to_sql(channel_names)
         collection.delete_one({'channel_name': channel_names})
         st.markdown('<p style="font-weight:bold;color:violet;">MIGRATED TO SQL</p>', unsafe_allow_html=True)
+    
+    
+
+    # Function to clear all data in multiple tables
+     def clear_data():
+      mycursor.execute("USE youtube_data")
+      tables = ['channel', 'comment', 'playlist','video'] 
+
+      for table in tables:
+        query = f"DELETE FROM {table};"
+        mycursor.execute(query)
+        connect.commit()
+
+     
+    # STREAMLIT APP FOR CLEAR THE TABLE IN SQL
+     def main():
+     #st.title("Clear Data from Tables")
+      clear_button = st.button("CLEAR DATA IN SQL")
+      
+      if clear_button:
+        clear_data()
+
+     if __name__ == '__main__':
+      main()
 
 
 if selected == "DATA ANALYSIS":
@@ -348,12 +370,24 @@ if selected == "DATA ANALYSIS":
 
 
     elif input_question == '5. Which videos have the highest number of likes, and what are their corresponding channel names':
-        cursor.execute("SELECT channel.Channel_Name, video.Like_Count, video.Video_Name FROM video JOIN channel ON video.Channel_Id = channel.Channel_Id ORDER BY video.Like_Count DESC LIMIT 10;")
-        result = cursor.fetchall()
-        df_5 = pd.DataFrame(result, columns=['Channel_Name', 'Like_Count','Video_Name']).reset_index()
-        df_5.index += 1
-        st.write(df_5)
+        col1,col2 =st.columns(2)
+        with col1:
+         cursor.execute("SELECT channel.Channel_Name, video.Like_Count, video.Video_Name FROM video JOIN channel ON video.Channel_Id = channel.Channel_Id ORDER BY video.Like_Count DESC LIMIT 10;")
+         result = cursor.fetchall()
+         df_5 = pd.DataFrame(result, columns=['Channel_Name', 'Like_Count','Video_Name']).reset_index()
+         df_5.index += 1
+         st.write(df_5)
+
+        with col2:
+          fig_vc = px.bar(df_5, y='Like_Count', x='Channel_Name', title="HIGHEST NUMBER OF LIKES", )
+          fig_vc.update_traces(textfont_size=16,marker_color='red')
+          fig_vc.update_layout(title_font_color='violet',title_font=dict(size=25))
+          st.plotly_chart(fig_vc,use_container_width=True) 
     
+   
+   
+   
+   
     elif input_question == '6. what is the total number of likes and dislikes of each video, and what are their corresponding video names':
         st.write(' In November 2021, YouTube removed the public dislike count from all of its videos.')
         cursor.execute("SELECT channel.Channel_Name, video.Like_Count, video.Video_Name, video.Dislike_Coun FROM video JOIN channel ON video.Channel_Id = channel.Channel_Id ORDER BY video.Dislike_Coun DESC;")
@@ -379,18 +413,20 @@ if selected == "DATA ANALYSIS":
     
     
     elif input_question == '8. what is the names of all the channels that have published videos in the year 2022':
-        cursor.execute("SELECT channel.Channel_Name, video.Video_Name, video.Published_date FROM channel JOIN playlist ON channel.Channel_Id = playlist.Channel_Id JOIN video ON playlist.Playlist_Id = video.Playlist_Id  WHERE EXTRACT(YEAR FROM Published_date) = 2022;")
-        result = cursor.fetchall()
-        df_8 = pd.DataFrame(result, columns=['Channel_Name', 'Video_Name','Year 2022 only']).reset_index()
-        df_8.index += 1
-        st.write(df_8)
+         cursor.execute("SELECT channel.Channel_Name FROM channel AS channel JOIN video ON channel.Channel_Id = video.Channel_Id WHERE YEAR(video.Published_date) = 2022 GROUP BY channel.Channel_Name;")
+         result = cursor.fetchall()
+         df_8 = pd.DataFrame(result, columns=['Channel_Name'])
+         df_8.index += 1
+         st.write(df_8)
+
 
     elif input_question == '9. what is the average duration of all videos in each channel, and what are their corresponding channel names':
-        cursor.execute("SELECT channel.Channel_Name, TIME_FORMAT(SEC_TO_TIME(AVG(TIME_TO_SEC(TIME(video.Duration)))), '%H:%i:%s') AS duration  FROM channel JOIN playlist ON channel.Channel_Id = playlist.Channel_Id JOIN video ON playlist.Playlist_Id = video.Playlist_Id GROUP by Channel_Name ORDER BY duration DESC ;")
+        cursor.execute("SELECT channel.Channel_Name, AVG(video.Duration) AS average_duration FROM channel JOIN video ON channel.Channel_Id = video.Channel_Id GROUP BY channel.Channel_Name;")
         result = cursor.fetchall()
-        df_9 = pd.DataFrame(result, columns=['Channel_Name', 'Average duration of videos (HH:MM:SS)']).reset_index()
+        df_9 = pd.DataFrame(result, columns=['Channel_Name','Duration'])
         df_9.index += 1
         st.write(df_9)
+
 
     elif input_question == '10. which videos have the highest number of comments,and what are their corresponding channel names':
         cursor.execute("SELECT channel.Channel_Name, video.Video_Name, video.Comment_Count FROM video JOIN channel ON video.Channel_Id = channel.Channel_Id ORDER BY video.Comment_Count DESC LIMIT 10;")
